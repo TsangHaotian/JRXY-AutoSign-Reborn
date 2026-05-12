@@ -41,7 +41,7 @@ class Utils:
         file_data = file.read()
         file.close()
         config = dict(yaml.load(file_data, Loader=yaml.FullLoader))
-        config['Version'] = '1.9.0'
+        config['Version'] = '2.0.0'
         return config
 
     # aes加密的实现
@@ -204,7 +204,7 @@ class Utils:
         extension = {
             "lon": env.userInfo['lon'],
             "model": "MI 6",
-            "appVersion": "9.0.14",
+            "appVersion": "10.0.13",
             "systemVersion": "8.0.0",
             "userId": env.userInfo['username'],
             "systemName": "android",
@@ -213,7 +213,7 @@ class Utils:
         }
         headers = {
             'User-Agent':
-            'Mozilla/5.0 (Linux; Android 8.0.0; MI 6 Build/OPR1.170623.027; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/92.0.4515.131 Mobile Safari/537.36 okhttp/3.12.4 cpdaily/9.0.14 wisedu/9.0.14',
+            'Mozilla/5.0 (Linux; Android 8.0.0; MI 6 Build/OPR1.170623.027; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/92.0.4515.131 Mobile Safari/537.36 okhttp/3.12.4 cpdaily/10.0.13 wisedu/10.0.13',
             'CpdailyStandAlone': '0',
             'extension': '1',
             'Cpdaily-Extension': Utils.DESEncrypt(json.dumps(extension)),
@@ -271,7 +271,7 @@ class Utils:
                 'wec-counselor-teacher-sign-apps/teacher/sign/getTeacherSignInfosInOneDay',
                 'wec-counselor-teacher-sign-apps/teacher/sign/detailSignInstance',
                 'wec-counselor-teacher-sign-apps/teacher/sign/submitSign',
-                'wec-counselor-teacher-sign-apps/teacher/oss/getUploadPolicy',
+                'wec-counselor-teacher-sign-apps/teacher/obs/getUploadPolicy',
                 'wec-counselor-teacher-sign-apps/teacher/sign/previewAttachment'
             ]
         ]
