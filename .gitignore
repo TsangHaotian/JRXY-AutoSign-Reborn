@@ -1,6 +1,6 @@
 __pycache__
 */__pycache__
+.venv/
 .idea/
 .session_cookies.json
 qrcode_login.png
-.venv/
