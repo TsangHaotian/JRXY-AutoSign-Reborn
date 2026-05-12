@@ -6,7 +6,6 @@ import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 import threading
 import os
-import time
 from datetime import datetime
 from PIL import Image, ImageTk, ImageDraw
 
@@ -30,26 +29,14 @@ FONT_CAPTION = ('.SF NS Text', 11)
 FONT_MONO = ('Menlo', 10)
 
 # 备选字体（Windows无SF字体时降级）
-try:
-    tk.Tk().withdraw()
-    tk.Label(text='test', font=FONT_TITLE).destroy()
-except:
+# Windows备选字体（macOS才有SF字体和semibold）
+import platform
+if platform.system() == 'Windows':
     FONT_TITLE = ('Microsoft YaHei', 15, 'bold')
     FONT_HEAD = ('Microsoft YaHei', 12, 'bold')
     FONT_BODY = ('Microsoft YaHei', 11)
     FONT_CAPTION = ('Microsoft YaHei', 10)
     FONT_MONO = ('Consolas', 10)
-
-
-def round_rect(canvas, x1, y1, x2, y2, r=12, **kw):
-    """画圆角矩形"""
-    points = [x1+r, y1, x2-r, y1,
-              x2, y1, x2, y1+r,
-              x2, y2-r, x2, y2,
-              x2-r, y2, x1+r, y2,
-              x1, y2, x1, y2-r,
-              x1, y1+r, x1, y1]
-    canvas.create_polygon(points, smooth=True, **kw)
 
 
 class TaskCard(tk.Frame):
@@ -109,11 +96,8 @@ class TaskCard(tk.Frame):
         else:
             self.select_indicator = None
 
-        # 点击绑定
-        for child in [self, body, title_row, info_row]:
-            for widget in [child] + child.winfo_children():
-                widget.bind('<Button-1>', self._on_click)
-                break
+        # 点击绑定（直接绑定到自身，事件会从子widget冒泡上来）
+        self.bind('<Button-1>', self._on_click)
 
     def _on_click(self, e):
         if self.on_click:
@@ -138,12 +122,12 @@ class App:
     def __init__(self):
         self.root = tk.Tk()
         self.root.title('今日校园')
-        self.root.geometry('400x780')
-        self.root.minsize(380, 700)
+        self.root.geometry('480x800')
+        self.root.minsize(420, 700)
         self.root.configure(bg=COLOR_BG)
 
         self.client = CpdailyClient.from_config()
-        self.client.on_log = self._core_log
+        self.client.on_log = self.log
 
         self.login_thread = None
         self.poll_stop = False
@@ -151,30 +135,11 @@ class App:
         self.photo_path = ''
         self.current_tasks = []
         self.selected_card = None
-        self.task_cards = []
-        self.log_messages = []
 
         self._build_ui()
         self._init_school()
 
     # ==================== UI ====================
-
-    def _make_card(self, parent, title, content_widget, padding=12):
-        """生成一个iOS风格卡片容器"""
-        outer = tk.Frame(parent, bg=COLOR_BG)
-        outer.pack(fill='x', padx=12, pady=4)
-        outer.pack_propagate(False)
-
-        # 白色卡片
-        card = tk.Frame(outer, bg=COLOR_CARD)
-        card.pack(fill='x')
-        # 圆角效果用mask（PIL画圆角图片垫底）
-        # 直接使用Frame的padding制造圆角假象
-
-        if title:
-            tk.Label(card, text=title, font=FONT_HEAD, bg=COLOR_CARD,
-                     fg=COLOR_TEXT).pack(anchor='w', padx=14, pady=(12, 2))
-        return card
 
     def _build_header(self, parent):
         header = tk.Frame(parent, bg=COLOR_BG)
@@ -317,14 +282,7 @@ class App:
 
     # ==================== 方法 ====================
 
-    def _core_log(self, msg):
-        now = datetime.now().strftime('%H:%M:%S')
-        self.log_messages.append((now, msg))
-
     def log(self, msg):
-        now = datetime.now().strftime('%H:%M:%S')
-        self.log_messages.append((now, msg))
-
         def _append():
             self.log_text.configure(state='normal')
             self.log_text.insert('end', f'{msg}\n')
@@ -381,30 +339,6 @@ class App:
                 self.task_count_label.configure(text=f'未签{unsigned} 已签{signed}')
         self.root.after(0, _update)
 
-    def rebuild_task_cards(self):
-        """重建任务卡片"""
-        for w in self.task_container.winfo_children():
-            w.destroy()
-        self.task_cards = []
-        self.selected_card = None
-        self.btn_sign.configure(state='disabled')
-
-        if not self.current_tasks:
-            tk.Label(self.task_container, text='暂无查寝任务', font=FONT_BODY,
-                     fg=COLOR_TEXT_SUB, bg=COLOR_BG).pack(pady=20)
-            return
-
-        for t in self.current_tasks:
-            is_unsigned = t in [x for x in self.current_tasks
-                                if t.get('signStatus') == '0' or
-                                not any(t2.get('signInstanceWid') == t.get('signInstanceWid')
-                                        for tasks in [self.current_tasks]
-                                        for t2 in tasks
-                                        if t2.get('signStatus') == '1')]
-
-            # 更简单的判断：从list_tasks的返回判断
-            # 会在refresh时设置is_unsigned属性
-
     def _choose_photo(self):
         path = filedialog.askopenfilename(title='选择照片',
                                           filetypes=[('图片', '*.jpg *.jpeg *.png')])
@@ -420,8 +354,6 @@ class App:
         card.set_selected(True)
         self.selected_card = card
         self.btn_sign.configure(state='normal')
-
-    # ==================== 学校初始化 ====================
 
     def _init_school(self):
         threading.Thread(target=self._do_init_school, daemon=True).start()
@@ -440,8 +372,6 @@ class App:
         except Exception as e:
             self.log(f'初始化失败: {e}')
             self.set_status('初始化失败', is_err=True)
-
-    # ==================== 登录 ====================
 
     def start_login(self):
         if self.login_thread and self.login_thread.is_alive():
@@ -486,8 +416,6 @@ class App:
             self.root.after(0, self.clear_qr)
             self.root.after(0, lambda: self.btn_login.configure(
                 state='normal', text='扫码登录'))
-
-    # ==================== 刷新任务 ====================
 
     def refresh_tasks(self):
         self.btn_refresh.configure(state='disabled', text='...')
@@ -534,8 +462,6 @@ class App:
             self.root.after(0, lambda: self.btn_refresh.configure(
                 state='normal', text='刷新'))
 
-    # ==================== 签到 ====================
-
     def start_sign(self):
         if self.signing or not self.selected_card:
             return
@@ -567,8 +493,6 @@ class App:
         finally:
             self.signing = False
             self.root.after(0, lambda: self.btn_sign.configure(state='normal', text='签到'))
-
-    # ==================== 启动 ====================
 
     def run(self):
         self.root.mainloop()
