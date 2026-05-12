@@ -1,3 +1,0 @@
-UI built, starting init
-start_init
-worker started

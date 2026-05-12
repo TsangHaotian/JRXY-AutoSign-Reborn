@@ -1,5 +1,0 @@
-starting
-started
-THREAD RUN
-DONE SIGNAL
-ALL OK

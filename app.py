@@ -6,9 +6,8 @@ import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 import threading
 import os
-import time
 from datetime import datetime
-from PIL import Image, ImageTk, ImageDraw, ImageFont
+from PIL import Image, ImageTk
 
 import requests
 
@@ -34,18 +33,10 @@ FONT_SMALL = ('Microsoft YaHei', 9)
 FONT_BOLD = ('Microsoft YaHei', 10, 'bold')
 
 
-def _create_rounded_rect(w, h, r, color):
-    """生成圆角矩形图片"""
-    img = Image.new('RGBA', (w, h), (0,0,0,0))
-    draw = ImageDraw.Draw(img)
-    draw.rounded_rectangle([(0,0), (w-1, h-1)], radius=r, fill=color)
-    return ImageTk.PhotoImage(img)
-
-
 class App:
     def __init__(self):
         self.root = tk.Tk()
-        self.root.title(f'今日校园查寝签到 v2.0')
+        self.root.title(f'今日校园查寝签到 v2.1')
         self.root.geometry('960x960')
         self.root.minsize(860, 900)
         self.root.configure(bg=COLOR_BG)
@@ -91,24 +82,27 @@ class App:
         body.pack(fill='x', pady=6)
 
         # 左侧：二维码
-        left = tk.Frame(body, bg=COLOR_CARD, width=200)
-        left.pack(side='left')
-        left.pack_propagate(False)
+        left = tk.Frame(body, bg=COLOR_CARD)
+        left.pack(side='left', fill='y')
         self.qr_label = tk.Label(left, bg=COLOR_CARD)
         self.qr_label.pack()
-        self.btn_login = tk.Button(left, text='📱 扫码登录', font=FONT_BOLD,
+
+        # 按钮区域（二维码下方）
+        btn_row = tk.Frame(left, bg=COLOR_CARD)
+        btn_row.pack(fill='x', pady=(6, 0))
+        self.btn_login = tk.Button(btn_row, text='📱 扫码登录', font=FONT_NORMAL,
                                    bg=COLOR_PRIMARY, fg='white', relief='flat',
                                    activebackground=COLOR_PRIMARY_LIGHT,
                                    command=self.start_login, state='disabled',
-                                   width=16, height=1)
-        self.btn_login.pack(pady=(6, 0))
+                                   width=12, height=1)
+        self.btn_login.pack(side='left', padx=(0, 4))
 
-        self.btn_switch = tk.Button(left, text='🔄 切换账号', font=FONT_NORMAL,
+        self.btn_switch = tk.Button(btn_row, text='🔄 切换', font=FONT_SMALL,
                                     bg='white', fg=COLOR_TEXT, relief='flat',
                                     highlightbackground=COLOR_BORDER,
                                     command=self.switch_account, state='disabled',
-                                    width=16)
-        self.btn_switch.pack(pady=(2, 0))
+                                    width=8)
+        self.btn_switch.pack(side='left')
 
         # 右侧：登录状态 + 信息
         right = tk.Frame(body, bg=COLOR_CARD, padx=15)
@@ -235,7 +229,7 @@ class App:
         footer = tk.Frame(parent, bg=COLOR_BG, height=24)
         footer.pack(fill='x')
         footer.pack_propagate(False)
-        tk.Label(footer, text=f'v2.0 | {self.client.school_name} | 基于 MPL-2.0 开源',
+        tk.Label(footer, text=f'v2.1 | {self.client.school_name} | 基于 MPL-2.0 开源',
                  font=('Microsoft YaHei', 8), bg=COLOR_BG,
                  fg=COLOR_TEXT_SECONDARY).pack(pady=3)
 
