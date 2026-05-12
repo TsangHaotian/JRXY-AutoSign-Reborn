@@ -10,7 +10,9 @@ import time
 from datetime import datetime
 from PIL import Image, ImageTk, ImageDraw, ImageFont
 
-from core import CpdailyClient
+import requests
+
+from core import CpdailyClient, BASE_UA
 
 
 # ==================== 主题色 ====================
@@ -44,8 +46,8 @@ class App:
     def __init__(self):
         self.root = tk.Tk()
         self.root.title(f'今日校园查寝签到 v2.0')
-        self.root.geometry('720x860')
-        self.root.minsize(680, 800)
+        self.root.geometry('960x960')
+        self.root.minsize(860, 900)
         self.root.configure(bg=COLOR_BG)
 
         # 核心客户端
@@ -100,6 +102,13 @@ class App:
                                    command=self.start_login, state='disabled',
                                    width=16, height=1)
         self.btn_login.pack(pady=(6, 0))
+
+        self.btn_switch = tk.Button(left, text='🔄 切换账号', font=FONT_NORMAL,
+                                    bg='white', fg=COLOR_TEXT, relief='flat',
+                                    highlightbackground=COLOR_BORDER,
+                                    command=self.switch_account, state='disabled',
+                                    width=16)
+        self.btn_switch.pack(pady=(2, 0))
 
         # 右侧：登录状态 + 信息
         right = tk.Frame(body, bg=COLOR_CARD, padx=15)
@@ -345,11 +354,34 @@ class App:
             self.root.after(0, lambda: self.btn_login.configure(state='normal'))
             if self.client.logged_in:
                 self.set_status('✅ 已登录（恢复会话）', is_ok=True)
+                self.root.after(0, lambda: self.btn_switch.configure(state='normal'))
                 self.root.after(0, lambda: self.btn_refresh.configure(state='normal'))
                 self.refresh_tasks()
         except Exception as e:
             self.log(f'初始化失败: {e}')
             self.set_status('初始化失败', is_err=True)
+
+    def switch_account(self):
+        """切换账号：清除会话 -> 重新扫码"""
+        if self.signing:
+            return
+        if not messagebox.askyesno('切换账号', '确定切换账号吗？\n当前登录会话将被清除。'):
+            return
+        self.client._clear_session()
+        self.client.logged_in = False
+        self.client.session = requests.session()
+        self.client.session.headers = {'User-Agent': BASE_UA}
+
+        # 恢复UI状态
+        self.current_tasks = []
+        self.root.after(0, lambda: self.task_tree.delete(*self.task_tree.get_children()))
+        self.root.after(0, lambda: self.task_count_label.configure(text=''))
+        self.root.after(0, lambda: self.btn_refresh.configure(state='disabled'))
+        self.root.after(0, lambda: self.btn_switch.configure(state='disabled'))
+        self.root.after(0, lambda: self.btn_login.configure(state='normal', text='📱 扫码登录'))
+        self.root.after(0, self.clear_qr)
+        self.set_status('会话已清除，请重新登录')
+        self.log('已清除登录会话，请重新扫码登录')
 
     # ==================== 扫码登录 ====================
 
@@ -383,6 +415,7 @@ class App:
                 self.root.after(0, self.clear_qr)
                 self.root.after(0, lambda: self.btn_login.configure(
                     state='disabled', text='✅ 已登录'))
+                self.root.after(0, lambda: self.btn_switch.configure(state='normal'))
                 self.root.after(0, lambda: self.btn_refresh.configure(state='normal'))
                 self.refresh_tasks()
             else:
@@ -390,6 +423,7 @@ class App:
                 self.root.after(0, self.clear_qr)
                 self.root.after(0, lambda: self.btn_login.configure(
                     state='normal', text='📱 扫码登录'))
+                self.root.after(0, lambda: self.btn_switch.configure(state='disabled'))
         except Exception as e:
             self.log(f'登录异常: {e}')
             self.set_status('登录失败', is_err=True)
