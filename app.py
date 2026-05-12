@@ -6,6 +6,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 import threading
 import os
+import uuid
 from datetime import datetime
 from PIL import Image, ImageTk
 
@@ -36,7 +37,7 @@ FONT_BOLD = ('Microsoft YaHei', 10, 'bold')
 class App:
     def __init__(self):
         self.root = tk.Tk()
-        self.root.title(f'今日校园查寝签到 v2.1')
+        self.root.title(f'今日校园查寝签到 v2.2')
         self.root.geometry('960x960')
         self.root.minsize(860, 900)
         self.root.configure(bg=COLOR_BG)
@@ -229,7 +230,7 @@ class App:
         footer = tk.Frame(parent, bg=COLOR_BG, height=24)
         footer.pack(fill='x')
         footer.pack_propagate(False)
-        tk.Label(footer, text=f'v2.1 | {self.client.school_name} | 基于 MPL-2.0 开源',
+        tk.Label(footer, text=f'v2.2 | {self.client.school_name} | 基于 MPL-2.0 开源',
                  font=('Microsoft YaHei', 8), bg=COLOR_BG,
                  fg=COLOR_TEXT_SECONDARY).pack(pady=3)
 
@@ -365,6 +366,7 @@ class App:
         self.client.logged_in = False
         self.client.session = requests.session()
         self.client.session.headers = {'User-Agent': BASE_UA}
+        self.client.device_id = str(uuid.uuid4())
 
         # 恢复UI状态
         self.current_tasks = []

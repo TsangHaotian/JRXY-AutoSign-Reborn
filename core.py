@@ -7,6 +7,7 @@ import time
 import re
 import os
 import uuid
+import random
 import base64
 import hashlib
 import urllib.parse
@@ -83,6 +84,9 @@ class CpdailyClient:
         self.session = requests.session()
         self.session.headers = {'User-Agent': BASE_UA}
 
+        # 固定设备ID，每次签到复用，不重新生成
+        self.device_id = str(uuid.uuid1())
+
         self.campus_host = None   # https://xjnu.campusphere.net/
         self.login_host = None    # https://authserver.xjnu.edu.cn/
         self.cas_login_url = None # CAS登录页完整URL
@@ -152,6 +156,7 @@ class CpdailyClient:
                      'path': c.path, 'secure': c.secure, 'rest': {'HttpOnly': c.has_nonstandard_attr('HttpOnly')}}
                     for c in self.session.cookies
                 ],
+                'device_id': self.device_id,
                 'campus_host': self.campus_host,
                 'login_host': self.login_host,
                 'cas_login_url': self.cas_login_url,
@@ -197,7 +202,8 @@ class CpdailyClient:
                 )
                 self.session.cookies.set_cookie(cookie)
 
-            # 恢复状态
+            # 恢复状态（含设备ID）
+            self.device_id = data.get('device_id', self.device_id)
             self.campus_host = data.get('campus_host')
             self.login_host = data.get('login_host')
             self.cas_login_url = data.get('cas_login_url')
@@ -405,17 +411,25 @@ class CpdailyClient:
         if campus is None:
             campus = self.campus
         coords = self.campuses[campus]
-        lon = coords['lon']
-        lat = coords['lat']
+        # 坐标增加随机微偏（小数点后第4位 ±0.0005，约50米浮动）
+        lon = str(float(coords['lon']) + random.uniform(-0.0005, 0.0005))
+        lat = str(float(coords['lat']) + random.uniform(-0.0005, 0.0005))
         address = f'{self.school_name}({campus})'
 
         self.log(f'校区: {campus} ({lon}, {lat})')
 
+        # 模拟人类操作延迟（打开App → 进入签到页）
+        delay = random.uniform(1.0, 2.5)
+        self.log(f'正在加载签到页面...')
+        time.sleep(delay)
+
         # 1. 获取任务详情
         self.log('正在获取任务详情...')
         task_detail = self.get_task_detail(task['signInstanceWid'], task['signWid'])
+        time.sleep(random.uniform(0.5, 1.2))
 
         # 2. 构建表单
+        self.log('正在填写签到信息...')
         form = {'signInstanceWid': task['signInstanceWid']}
 
         if task_detail.get('isPhoto') == 1:
@@ -423,6 +437,7 @@ class CpdailyClient:
             if not photo_path or not os.path.exists(photo_path):
                 return {'success': False, 'message': '该任务需要照片但未选择'}
             self.log('正在上传照片...')
+            time.sleep(random.uniform(0.8, 1.5))
             fileName = self._upload_photo(photo_path)
             form['signPhotoUrl'] = self._get_photo_url(fileName)
             self.log('照片上传完成')
@@ -449,13 +464,17 @@ class CpdailyClient:
         form['uaIsCpadaily'] = True
         form['signVersion'] = '1.0.0'
 
+        # 模拟确认提交前停顿
+        time.sleep(random.uniform(0.3, 1.0))
+        self.log('正在确认签到...')
+
         # 3. 加密提交
         self.log('正在加密并提交签到...')
         extension = {
             "lon": lon, "model": "MI 6",
             "appVersion": "10.0.13", "systemVersion": "8.0.0",
             "userId": '', "systemName": "android",
-            "lat": lat, "deviceId": str(uuid.uuid1()),
+            "lat": lat, "deviceId": self.device_id,
         }
 
         body_string = aes_encrypt(json.dumps(form), self.aes_key)
