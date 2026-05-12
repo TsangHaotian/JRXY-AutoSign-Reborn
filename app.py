@@ -1,19 +1,19 @@
 """
-今日校园查寝签到 - PyQt5桌面版
+今日校园查寝签到 - PySide6桌面版
 专业界面，线程安全，业务逻辑委托给core.CpdailyClient
 """
 import sys
 import os
 import traceback
 from datetime import datetime
-from PyQt5.QtCore import (QThread, pyqtSignal, Qt, QByteArray, QBuffer,
-                          QIODevice)
-from PyQt5.QtGui import QPixmap, QIcon, QFont, QTextCursor
-from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
-                             QHBoxLayout, QLabel, QPushButton, QComboBox,
-                             QTableWidget, QTableWidgetItem, QHeaderView,
-                             QTextEdit, QMessageBox, QFileDialog,
-                             QGroupBox, QGridLayout, QFrame)
+from PySide6.QtCore import (QThread, Signal, Qt, QByteArray, QBuffer,
+                            QIODevice)
+from PySide6.QtGui import QPixmap, QIcon, QFont, QTextCursor
+from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
+                               QHBoxLayout, QLabel, QPushButton, QComboBox,
+                               QTableWidget, QTableWidgetItem, QHeaderView,
+                               QTextEdit, QMessageBox, QFileDialog,
+                               QGroupBox, QGridLayout, QFrame)
 
 from core import CpdailyClient
 
@@ -22,9 +22,9 @@ from core import CpdailyClient
 
 class LoginWorker(QThread):
     """扫码登录工作线程：获取二维码 + 轮询"""
-    qr_ready = pyqtSignal(bytes)     # 二维码图片bytes
-    status_update = pyqtSignal(str)  # 状态文字
-    login_result = pyqtSignal(bool)  # 成功/失败
+    qr_ready = Signal(bytes)     # 二维码图片bytes
+    status_update = Signal(str)  # 状态文字
+    login_result = Signal(bool)  # 成功/失败
 
     def __init__(self, client):
         super().__init__()
@@ -54,8 +54,9 @@ class LoginWorker(QThread):
 
 class TaskWorker(QThread):
     """一次性任务线程（查任务/签到等）"""
-    finished = pyqtSignal(object)
-    error = pyqtSignal(str)
+    finished = Signal(object)
+    error = Signal(str)
+    log_signal = Signal(str)
 
     def __init__(self, client, method_name, *args):
         super().__init__()
@@ -64,12 +65,19 @@ class TaskWorker(QThread):
         self.args = args
 
     def run(self):
+        # 注入日志转发：工作线程的日志通过信号发回主线程
+        orig_log = self.client.on_log
+        def safe_log(msg):
+            self.log_signal.emit(msg)
+        self.client.on_log = safe_log
         try:
             method = getattr(self.client, self.method_name)
             result = method(*self.args)
             self.finished.emit(result)
         except Exception as e:
             self.error.emit(f'{self.method_name} 失败: {e}\n{traceback.format_exc()}')
+        finally:
+            self.client.on_log = orig_log
 
 
 # ==================== 主窗口 ====================
@@ -210,9 +218,9 @@ class MainWindow(QMainWindow):
         self.task_table.setColumnWidth(0, 70)
         self.task_table.setColumnWidth(2, 130)
         self.task_table.setColumnWidth(3, 200)
-        self.task_table.setSelectionBehavior(self.task_table.SelectRows)
-        self.task_table.setSelectionMode(self.task_table.SingleSelection)
-        self.task_table.setEditTriggers(self.task_table.NoEditTriggers)
+        self.task_table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.task_table.setSelectionMode(QTableWidget.SingleSelection)
+        self.task_table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.task_table.setAlternatingRowColors(True)
         self.task_table.verticalHeader().setVisible(False)
         self.task_table.itemSelectionChanged.connect(self._on_selection_changed)
@@ -254,6 +262,7 @@ class MainWindow(QMainWindow):
         worker = TaskWorker(self.client, 'init_school')
         worker.finished.connect(self._on_init_done)
         worker.error.connect(lambda msg: self._on_error('初始化', msg))
+        worker.log_signal.connect(self._on_client_log)
         worker.start()
 
     def _on_init_done(self, data):
@@ -320,6 +329,7 @@ class MainWindow(QMainWindow):
         worker = TaskWorker(self.client, 'list_tasks')
         worker.finished.connect(self._on_tasks_loaded)
         worker.error.connect(lambda msg: self._on_error('获取任务', msg))
+        worker.log_signal.connect(self._on_client_log)
         worker.start()
 
     def _on_tasks_loaded(self, result):
@@ -336,7 +346,7 @@ class MainWindow(QMainWindow):
         self.task_table.setRowCount(len(self.current_tasks))
         for i, t in enumerate(self.current_tasks):
             is_u = t.get('_unsigned', False)
-            status_text = '❌ 未签到' if is_u else '✅ 已签到'
+            status_text = '[未签到]' if is_u else '[已签到]'
             item_status = QTableWidgetItem(status_text)
             item_status.setForeground(Qt.red if is_u else Qt.darkGreen)
 
@@ -385,6 +395,7 @@ class MainWindow(QMainWindow):
         worker = TaskWorker(self.client, 'sign_task', task, campus, self.photo_path)
         worker.finished.connect(self._on_sign_done)
         worker.error.connect(lambda msg: self._on_error('签到', msg))
+        worker.log_signal.connect(self._on_client_log)
         worker.start()
 
     def _on_sign_done(self, result):
@@ -429,12 +440,12 @@ class MainWindow(QMainWindow):
 # ==================== 启动 ====================
 
 def main():
-    # 防崩溃：禁用ANGLE/DirectX，软件渲染
+    # 防崩溃：强制Qt软件渲染，禁用显卡加速
     import os as _os
     _os.environ['QT_OPENGL'] = 'software'
     _os.environ['QT_QUICK_BACKEND'] = 'software'
-    _os.environ['QMLSCENE_DEVICE'] = 'softwarecontext'
-    _os.environ['QT_ANGLE_PLATFORM'] = ''
+    _os.environ['QSG_RENDERER_LOOP'] = 'basic'
+    _os.environ['QT_ANGLE_PLATFORM'] = 'swiftshader'
 
     app = QApplication(sys.argv)
     app.setStyle('Fusion')
