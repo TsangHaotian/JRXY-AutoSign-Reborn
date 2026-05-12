@@ -1,41 +1,32 @@
 """
-今日校园查寝任务查看器 - tkinter桌面版
-扫码登录后查看每天的查寝任务，不提交签到
+今日校园查寝签到工具 - tkinter桌面版
+薄GUI层，业务逻辑委托给core.CpdailyClient
 """
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, filedialog
 import threading
-import json
-import time
-import re
-import requests
 import os
-from io import BytesIO
 from PIL import Image, ImageTk
-from bs4 import BeautifulSoup
 
-requests.packages.urllib3.disable_warnings(requests.packages.urllib3.exceptions.InsecureRequestWarning)
+from core import CpdailyClient
 
-# 配置
-SCHOOL_NAME = '新疆师范大学'
-QR_FILE = 'qrcode_login.png'
 
 class App:
     def __init__(self):
         self.root = tk.Tk()
-        self.root.title(f'今日校园查寝 - {SCHOOL_NAME}')
-        self.root.geometry('500x650')
+        self.root.title('今日校园查寝签到')
+        self.root.geometry('520x750')
         self.root.resizable(False, False)
 
-        # 状态变量
-        self.session = requests.session()
-        self.session.headers = {
-            'User-Agent': 'Mozilla/5.0 (Linux; Android 8.0.0; MI 6 Build/OPR1.170623.027; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/92.0.4515.131 Mobile Safari/537.36 okhttp/3.12.4',
-        }
-        self.campus_host = None
-        self.logged_in = False
+        # 核心客户端
+        self.client = CpdailyClient.from_config()
+        self.client.on_log = self.log
+
         self.login_thread = None
         self.poll_stop = False
+        self.signing = False
+        self.photo_path = ''
+        self.current_tasks = []
 
         self._build_ui()
         self._init_school()
@@ -54,37 +45,59 @@ class App:
         self.btn_login = ttk.Button(login_frame, text='扫码登录', command=self.start_login, state='disabled')
         self.btn_login.pack(pady=5)
 
+        # ===== 校区/照片选择 =====
+        cfg_frame = ttk.Frame(self.root)
+        cfg_frame.pack(fill='x', padx=10, pady=2)
+
+        ttk.Label(cfg_frame, text='校区:').pack(side='left')
+        self.campus_var = tk.StringVar(value=self.client.campus)
+        campus_menu = ttk.Combobox(cfg_frame, textvariable=self.campus_var,
+                                   values=list(self.client.campuses.keys()),
+                                   state='readonly', width=12)
+        campus_menu.pack(side='left', padx=5)
+
+        ttk.Label(cfg_frame, text=' 照片:').pack(side='left')
+        self.photo_label = tk.StringVar(value='(可选)')
+        ttk.Label(cfg_frame, textvariable=self.photo_label, width=15).pack(side='left', padx=2)
+        ttk.Button(cfg_frame, text='选择', command=self._choose_photo).pack(side='left')
+
         # ===== 任务区域 =====
-        task_frame = ttk.LabelFrame(self.root, text='今日查寝任务', padding=10)
+        task_frame = ttk.LabelFrame(self.root, text='查寝任务', padding=10)
         task_frame.pack(fill='both', expand=True, padx=10, pady=5)
 
-        self.task_tree = ttk.Treeview(task_frame, columns=('status', 'time'), show='tree', height=6)
+        self.task_tree = ttk.Treeview(task_frame, columns=('status', 'time'), show='tree', height=5)
         self.task_tree.heading('#0', text='任务名称')
         self.task_tree.heading('status', text='状态')
         self.task_tree.heading('time', text='签到时间')
         self.task_tree.column('#0', width=200)
-        self.task_tree.column('status', width=80)
-        self.task_tree.column('time', width=140)
+        self.task_tree.column('status', width=70)
+        self.task_tree.column('time', width=160)
         self.task_tree.pack(fill='both', expand=True)
+        self.task_tree.bind('<<TreeviewSelect>>', self._on_task_select)
 
-        self.btn_refresh = ttk.Button(task_frame, text='刷新任务', command=self.refresh_tasks, state='disabled')
-        self.btn_refresh.pack(pady=5)
+        btn_frame = ttk.Frame(task_frame)
+        btn_frame.pack(pady=5)
+        self.btn_refresh = ttk.Button(btn_frame, text='刷新任务', command=self.refresh_tasks, state='disabled')
+        self.btn_refresh.pack(side='left', padx=5)
+        self.btn_sign = ttk.Button(btn_frame, text='签到选中任务', command=self.start_sign, state='disabled')
+        self.btn_sign.pack(side='left', padx=5)
 
         # ===== 日志区域 =====
         log_frame = ttk.LabelFrame(self.root, text='日志', padding=5)
         log_frame.pack(fill='both', padx=10, pady=5)
 
-        self.log_text = tk.Text(log_frame, height=8, width=60, state='disabled')
-        scrollbar = ttk.Scrollbar(log_frame, orient='vertical', command=self.log_text.yview)
+        self.log_text = tk.Text(log_frame, height=10, width=60, state='disabled')
+        scrollbar = ttk.Scrollbar(log_frame, command=self.log_text.yview)
         self.log_text.configure(yscrollcommand=scrollbar.set)
         self.log_text.pack(side='left', fill='both', expand=True)
         scrollbar.pack(side='right', fill='y')
 
-    # ===== 工具方法 =====
+    # ==================== 工具方法 ====================
+
     def log(self, msg):
-        import threading
         def _append():
             self.log_text.configure(state='normal')
+            import time
             now = time.strftime('%H:%M:%S')
             self.log_text.insert('end', f'[{now}] {msg}\n')
             self.log_text.see('end')
@@ -94,10 +107,9 @@ class App:
     def set_status(self, text):
         self.root.after(0, lambda: self.login_status.set(text))
 
-    def show_qr(self, image_path):
+    def show_qr(self, path):
         try:
-            img = Image.open(image_path)
-            img = img.resize((200, 200))
+            img = Image.open(path).resize((200, 200))
             photo = ImageTk.PhotoImage(img)
             self.qr_label.configure(image=photo)
             self.qr_label.image = photo
@@ -107,150 +119,86 @@ class App:
     def clear_qr(self):
         self.qr_label.configure(image='')
 
-    # ===== 学校初始化 =====
+    def _choose_photo(self):
+        path = filedialog.askopenfilename(title='选择签到照片',
+                                          filetypes=[('图片', '*.jpg *.jpeg *.png')])
+        if path:
+            self.photo_path = path
+            self.photo_label.set(os.path.basename(path)[:12])
+
+    def _on_task_select(self, _event):
+        sel = self.task_tree.selection()
+        if sel:
+            item = self.task_tree.item(sel[0])
+            self.btn_sign.configure(state='normal' if item['values'][0] == '❌ 未签' else 'disabled')
+        else:
+            self.btn_sign.configure(state='disabled')
+
+    # ==================== 学校初始化 ====================
+
     def _init_school(self):
         threading.Thread(target=self._do_init_school, daemon=True).start()
 
     def _do_init_school(self):
         try:
-            self.log('获取学校信息...')
-            schools = requests.get(
-                'https://mobile.campushoy.com/v6/config/guest/tenant/list',
-                verify=False, timeout=15
-            ).json()['data']
-
-            for item in schools:
-                if item['name'] == SCHOOL_NAME:
-                    school_id = item['id']
-                    join_type = item['joinType']
-                    self.log(f'学校: {SCHOOL_NAME}, joinType: {join_type}')
-                    break
-            else:
-                self.log('未找到学校!')
-                return
-
-            info = requests.get(
-                'https://mobile.campushoy.com/v6/config/guest/tenant/info',
-                params={'ids': school_id}, verify=False, timeout=15
-            ).json()['data'][0]
-
-            amp_url = info['ampUrl']
-            self.campus_host = re.findall(r'\w{4,5}://.*?/', amp_url)[0]
-            self.login_url = info['ampUrl']
-
-            # 访问客户端获取CAS重定向URL
-            res = self.session.get(self.campus_host.rstrip('/') + '/wec-portal-mobile/client', verify=False, timeout=15)
-            self.cas_login_url = res.url
-            self.login_host = re.findall(r'\w{4,5}://.*?/', self.cas_login_url)[0]
-
-            self.log(f'校园域名: {self.campus_host}')
-            self.set_status('准备就绪，请点击扫码登录')
+            self.client.init_school()
+            self.set_status('准备就绪')
             self.root.after(0, lambda: self.btn_login.configure(state='normal'))
+            if self.client.logged_in:
+                self.set_status('✅ 已登录（恢复会话）')
+                self.root.after(0, lambda: self.btn_refresh.configure(state='normal'))
+                self.refresh_tasks()
         except Exception as e:
             self.log(f'初始化失败: {e}')
-            self.set_status(f'初始化失败: {e}')
+            self.set_status('初始化失败')
 
-    # ===== 扫码登录 =====
+    # ==================== 扫码登录 ====================
+
     def start_login(self):
         if self.login_thread and self.login_thread.is_alive():
             return
         self.btn_login.configure(state='disabled')
-        self.poll_stop = False
         self.login_thread = threading.Thread(target=self._do_login, daemon=True)
         self.login_thread.start()
 
     def _do_login(self):
         try:
-            self.set_status('获取二维码...')
+            # 获取并显示二维码
             self.log('正在获取二维码...')
-
-            # 先访问CAS登录页获取cookie
-            self.session.get(self.cas_login_url, verify=False, timeout=15)
-
-            # 获取二维码UUID
-            qr_get_url = self.login_host.rstrip('/') + '/authserver/qrCode/get?ts=' + str(int(time.time() * 1000))
-            qr_res = self.session.get(qr_get_url, verify=False, timeout=15)
-            qr_uuid = qr_res.text.strip()
-
-            if not qr_uuid:
-                self.log('获取二维码UUID失败')
-                self.set_status('获取二维码失败')
-                self.root.after(0, lambda: self.btn_login.configure(state='normal'))
-                return
-
-            # 下载二维码图片
-            qr_img_url = self.login_host.rstrip('/') + '/authserver/qrCode/code?uuid=' + qr_uuid
-            img_res = self.session.get(qr_img_url, verify=False, timeout=15)
-            with open(QR_FILE, 'wb') as f:
-                f.write(img_res.content)
-
-            self.root.after(0, lambda: self.show_qr(QR_FILE))
-            self.set_status('等待扫码...')
+            uuid, img_bytes = self.client.get_qr_image()
             self.log('二维码已生成，请用今日校园APP扫描')
+            self.set_status('等待扫码...')
 
-            # 轮询扫码状态
-            qr_status_url = self.login_host.rstrip('/') + '/authserver/qrCode/status'
-            for i in range(120):
-                if self.poll_stop:
-                    return
-                time.sleep(1)
-                try:
-                    r = self.session.get(f'{qr_status_url}?uuid={qr_uuid}&ts={int(time.time()*1000)}',
-                                        verify=False, timeout=10)
-                    status = r.text.strip()
+            # 保存并显示二维码
+            qr_path = 'qrcode_login.png'
+            with open(qr_path, 'wb') as f:
+                f.write(img_bytes)
+            self.root.after(0, lambda: self.show_qr(qr_path))
 
-                    if status == '1':
-                        self.log('扫码成功!')
-                        self.set_status('正在完成登录...')
+            # 轮询扫码
+            def on_status(msg):
+                self.set_status(msg)
+                self.log(msg)
 
-                        # 提交qrLoginForm
-                        time.sleep(1)
-                        qr_page = self.session.get(
-                            self.login_host.rstrip('/') + '/authserver/login?display=qrLogin',
-                            verify=False, timeout=15)
-                        soup = BeautifulSoup(qr_page.text, 'html.parser')
-                        qr_form = soup.find('form', {'id': 'qrLoginForm'})
+            success = self.client.poll_qr_login(uuid, on_status=on_status)
 
-                        if qr_form:
-                            form_data = {}
-                            for inp in qr_form.find_all('input'):
-                                name = inp.get('name', '')
-                                if name:
-                                    form_data[name] = inp.get('value', '')
-                            form_data['uuid'] = qr_uuid
-                            action = qr_form.get('action', '')
-                            submit_url = self.login_host.rstrip('/') + action
-                            r = self.session.post(submit_url, data=form_data, verify=False,
-                                                  timeout=15, allow_redirects=False)
-                            if r.status_code == 302:
-                                location = r.headers.get('Location', '')
-                                self.session.get(location, verify=False, timeout=15)
-
-                        self.logged_in = True
-                        self.set_status('✅ 已登录')
-                        self.root.after(0, self.clear_qr)
-                        self.root.after(0, lambda: self.btn_refresh.configure(state='normal'))
-                        self.refresh_tasks()
-                        return
-
-                    elif status == '2' and i % 5 == 0:
-                        self.log('手机已扫码，等待确认...')
-                        self.set_status('已扫码，请在手机上确认')
-                except:
-                    pass
-
-            self.log('等待扫码超时')
-            self.set_status('扫码超时')
-            self.root.after(0, self.clear_qr)
-            self.root.after(0, lambda: self.btn_login.configure(state='normal'))
-
+            if success:
+                self.set_status('✅ 已登录')
+                self.root.after(0, self.clear_qr)
+                self.root.after(0, lambda: self.btn_refresh.configure(state='normal'))
+                self.refresh_tasks()
+            else:
+                self.set_status('扫码超时')
+                self.root.after(0, self.clear_qr)
+                self.root.after(0, lambda: self.btn_login.configure(state='normal'))
         except Exception as e:
-            self.log(f'登录失败: {e}')
-            self.set_status(f'登录失败')
+            self.log(f'登录异常: {e}')
+            self.set_status('登录失败')
             self.root.after(0, self.clear_qr)
             self.root.after(0, lambda: self.btn_login.configure(state='normal'))
 
-    # ===== 刷新任务 =====
+    # ==================== 刷新任务 ====================
+
     def refresh_tasks(self):
         self.btn_refresh.configure(state='disabled')
         threading.Thread(target=self._do_refresh, daemon=True).start()
@@ -258,65 +206,79 @@ class App:
     def _do_refresh(self):
         try:
             self.log('正在获取查寝任务...')
-            headers = {'Content-Type': 'application/json'}
+            result = self.client.list_tasks()
+            self.current_tasks = result['all']
 
-            # 查今天
-            url = self.campus_host + 'wec-counselor-attendance-apps/student/attendance/getStuAttendacesInOneDay'
-            self.session.post(url, headers=headers, data=json.dumps({}), verify=False, timeout=15)
-            r = self.session.post(url, headers=headers, data=json.dumps({}), verify=False, timeout=15)
-            data = r.json()
-
-            if data.get('code') != '0':
-                self.log(f'API返回异常: {data.get("message", "未知")}')
-                return
-
-            datas = data['datas']
-            unsigned = datas.get('unSignedTasks', [])
-            signed = datas.get('signedTasks', [])
-
-            # 也查一下昨天和明天的
-            tasks_map = {}
-            for date_offset, label in [(-1, '昨天'), (0, '今天'), (1, '明天')]:
-                from datetime import datetime, timedelta
-                d = (datetime.now() + timedelta(days=date_offset)).strftime('%Y-%m-%d')
-                try:
-                    self.session.post(url, headers=headers, data=json.dumps({'date': d}), verify=False, timeout=15)
-                    r2 = self.session.post(url, headers=headers, data=json.dumps({'date': d}), verify=False, timeout=15)
-                    if r2.status_code == 200:
-                        d2 = r2.json()
-                        if 'datas' in d2:
-                            for t in d2['datas'].get('unSignedTasks', []):
-                                tname = t['taskName'] + f' ({label})'
-                                tasks_map[tname] = ('未签到', t.get('singleTaskBeginTime',''), t)
-                            for t in d2['datas'].get('signedTasks', []):
-                                tname = t['taskName'] + f' ({label})'
-                                tasks_map[tname] = ('已签到', t.get('singleTaskBeginTime',''), t)
-                except:
-                    pass
-
-            # 更新UI
-            def _update_tree():
+            def _update():
                 self.task_tree.delete(*self.task_tree.get_children())
-                if not unsigned and not signed:
+                for t in result['unsigned']:
+                    tr = f"{t.get('singleTaskBeginTime','')} - {t.get('singleTaskEndTime','')}"
+                    self.task_tree.insert('', 'end', text=t['taskName'], values=('❌ 未签', tr))
+                for t in result['signed']:
+                    tr = f"{t.get('singleTaskBeginTime','')} - {t.get('singleTaskEndTime','')}"
+                    self.task_tree.insert('', 'end', text=t['taskName'], values=('✅ 已签', tr))
+                if not result['all']:
                     self.task_tree.insert('', 'end', text='暂无查寝任务', values=('', ''))
-                for t in unsigned:
-                    name = t['taskName']
-                    time_range = f"{t.get('singleTaskBeginTime','')} - {t.get('singleTaskEndTime','')}"
-                    self.task_tree.insert('', 'end', text=name, values=('❌ 未签', time_range))
-                for t in signed:
-                    name = t['taskName']
-                    time_range = f"{t.get('singleTaskBeginTime','')} - {t.get('singleTaskEndTime','')}"
-                    self.task_tree.insert('', 'end', text=name, values=('✅ 已签', time_range))
 
-            self.root.after(0, _update_tree)
-            self.log(f'今日: 未签到{len(unsigned)}个, 已签到{len(signed)}个')
-
+            self.root.after(0, _update)
+            self.log(f'今日: 未签到{len(result["unsigned"])}个, 已签到{len(result["signed"])}个')
         except Exception as e:
             self.log(f'获取任务失败: {e}')
         finally:
             self.root.after(0, lambda: self.btn_refresh.configure(state='normal'))
 
-    # ===== 启动 =====
+    # ==================== 签到 ====================
+
+    def start_sign(self):
+        if self.signing:
+            return
+        sel = self.task_tree.selection()
+        if not sel:
+            messagebox.showwarning('提示', '请先选择一个未签到任务')
+            return
+        item = self.task_tree.item(sel[0])
+        if item['values'][0] != '❌ 未签':
+            messagebox.showwarning('提示', '该任务已签到')
+            return
+
+        task_name = item['text']
+        task = None
+        for t in self.current_tasks:
+            if t['taskName'] == task_name:
+                task = t
+                break
+        if not task:
+            messagebox.showerror('错误', '未找到任务数据，请刷新')
+            return
+
+        if not messagebox.askyesno('确认签到', f'确定签到"{task_name}"吗？'):
+            return
+
+        self.signing = True
+        self.btn_sign.configure(state='disabled', text='签到中...')
+        threading.Thread(target=self._do_sign, args=(task,), daemon=True).start()
+
+    def _do_sign(self, task):
+        try:
+            campus = self.campus_var.get()
+            result = self.client.sign_task(task, campus=campus, photo_path=self.photo_path)
+            if result['success']:
+                self.set_status('✅ 签到成功')
+                self.root.after(0, lambda: messagebox.showinfo('成功', '签到成功!'))
+                self.refresh_tasks()
+            else:
+                self.set_status('签到失败')
+                self.root.after(0, lambda: messagebox.showerror('失败', f'签到失败: {result["message"]}'))
+        except Exception as e:
+            self.log(f'签到出错: {e}')
+            self.set_status('签到出错')
+            self.root.after(0, lambda: messagebox.showerror('错误', f'签到出错: {e}'))
+        finally:
+            self.signing = False
+            self.root.after(0, lambda: self.btn_sign.configure(state='normal', text='签到选中任务'))
+
+    # ==================== 启动 ====================
+
     def run(self):
         self.root.mainloop()
 

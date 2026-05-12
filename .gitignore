@@ -1,2 +1,4 @@
 __pycache__
 */__pycache__
+.session_cookies.json
+qrcode_login.png
