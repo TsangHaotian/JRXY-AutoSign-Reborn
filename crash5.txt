@@ -1,0 +1,10 @@
+started
+THREAD: creating client
+THREAD: calling init_school
+LOG: 获取学校信息...
+LOG: 学校: 新疆师范大学, joinType: NOTCLOUD
+LOG: 校园域名: https://xjnu.campusphere.net/
+LOG: 已恢复上次登录会话
+THREAD: done, logged_in=True
+DONE SIG
+ALL OK

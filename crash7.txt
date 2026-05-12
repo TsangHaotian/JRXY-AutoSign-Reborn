@@ -1,0 +1,6 @@
+UI ready
+started
+THREAD: init
+THREAD: done
+DONE
+ALL OK

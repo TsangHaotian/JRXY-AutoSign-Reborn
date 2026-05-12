@@ -1,0 +1,4 @@
+=== START ===
+window ready, starting init_school
+_init_school called
+worker started

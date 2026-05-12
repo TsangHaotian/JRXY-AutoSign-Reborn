@@ -100,7 +100,9 @@ class MainWindow(QMainWindow):
         self.task_worker = None
 
         self._build_ui()
-        self._init_school()
+        # 延迟初始化，避免窗口展示前worker线程与GUI交互
+        from PySide6.QtCore import QTimer
+        QTimer.singleShot(200, self._init_school)
 
     # ==================== UI 构建 ====================
 
@@ -259,6 +261,8 @@ class MainWindow(QMainWindow):
 
     def _init_school(self):
         self.set_status('正在初始化...')
+        import faulthandler
+        faulthandler.enable()
         worker = TaskWorker(self.client, 'init_school')
         worker.finished.connect(self._on_init_done)
         worker.error.connect(lambda msg: self._on_error('初始化', msg))
@@ -326,6 +330,8 @@ class MainWindow(QMainWindow):
         self.set_status('获取任务...')
         self.log('正在获取查寝任务...')
 
+        import faulthandler
+        faulthandler.enable()
         worker = TaskWorker(self.client, 'list_tasks')
         worker.finished.connect(self._on_tasks_loaded)
         worker.error.connect(lambda msg: self._on_error('获取任务', msg))
@@ -392,6 +398,8 @@ class MainWindow(QMainWindow):
         self.set_status('正在签到...')
 
         campus = self.cmb_campus.currentText()
+        import faulthandler
+        faulthandler.enable()
         worker = TaskWorker(self.client, 'sign_task', task, campus, self.photo_path)
         worker.finished.connect(self._on_sign_done)
         worker.error.connect(lambda msg: self._on_error('签到', msg))
@@ -446,12 +454,14 @@ def main():
     _os.environ['QT_QUICK_BACKEND'] = 'software'
     _os.environ['QSG_RENDERER_LOOP'] = 'basic'
     _os.environ['QT_ANGLE_PLATFORM'] = 'swiftshader'
+    import faulthandler
+    faulthandler.enable()
 
     app = QApplication(sys.argv)
     app.setStyle('Fusion')
     window = MainWindow()
     window.show()
-    sys.exit(app.exec_())
+    sys.exit(app.exec())
 
 
 if __name__ == '__main__':

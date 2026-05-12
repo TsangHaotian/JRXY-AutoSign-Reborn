@@ -1,0 +1,7 @@
+init_school on main thread
+init done, logged_in=True
+starting list_tasks thread
+THREAD: list_tasks
+THREAD: got 1 tasks
+DONE
+ALL OK
