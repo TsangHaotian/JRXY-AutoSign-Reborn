@@ -37,7 +37,7 @@ FONT_BOLD = ('Microsoft YaHei', 10, 'bold')
 class App:
     def __init__(self):
         self.root = tk.Tk()
-        self.root.title(f'今日校园查寝签到 v2.2')
+        self.root.title(f'今日校园查寝签到 v2.3')
         self.root.geometry('960x960')
         self.root.minsize(860, 900)
         self.root.configure(bg=COLOR_BG)
@@ -86,24 +86,19 @@ class App:
         left = tk.Frame(body, bg=COLOR_CARD)
         left.pack(side='left', fill='y')
         self.qr_label = tk.Label(left, bg=COLOR_CARD)
-        self.qr_label.pack()
-
-        # 按钮区域（二维码下方）
-        btn_row = tk.Frame(left, bg=COLOR_CARD)
-        btn_row.pack(fill='x', pady=(6, 0))
-        self.btn_login = tk.Button(btn_row, text='📱 扫码登录', font=FONT_NORMAL,
+        self.qr_label.pack(pady=(10, 0))
+        self.btn_login = tk.Button(left, text='📱 扫码登录', font=FONT_NORMAL,
                                    bg=COLOR_PRIMARY, fg='white', relief='flat',
                                    activebackground=COLOR_PRIMARY_LIGHT,
                                    command=self.start_login, state='disabled',
-                                   width=12, height=1)
-        self.btn_login.pack(side='left', padx=(0, 4))
-
-        self.btn_switch = tk.Button(btn_row, text='🔄 切换', font=FONT_SMALL,
+                                   width=16, height=1)
+        self.btn_login.pack(pady=(8, 2))
+        self.btn_switch = tk.Button(left, text='🔄 切换账号', font=FONT_SMALL,
                                     bg='white', fg=COLOR_TEXT, relief='flat',
                                     highlightbackground=COLOR_BORDER,
                                     command=self.switch_account, state='disabled',
-                                    width=8)
-        self.btn_switch.pack(side='left')
+                                    width=16)
+        self.btn_switch.pack()
 
         # 右侧：登录状态 + 信息
         right = tk.Frame(body, bg=COLOR_CARD, padx=15)
@@ -187,7 +182,7 @@ class App:
 
         # 表格
         columns = ('status', 'sender', 'time')
-        self.task_tree = ttk.Treeview(card, columns=columns, show='tree', height=6,
+        self.task_tree = ttk.Treeview(card, columns=columns, show='tree', height=3,
                                       selectmode='browse')
         self.task_tree.heading('#0', text='任务名称')
         self.task_tree.heading('status', text='状态')
@@ -217,7 +212,7 @@ class App:
         tk.Label(card, text='📝 运行日志', font=FONT_BOLD, bg=COLOR_CARD,
                  fg=COLOR_TEXT).pack(anchor='w')
 
-        self.log_text = tk.Text(card, height=6, font=('Consolas', 9),
+        self.log_text = tk.Text(card, height=18, font=('Consolas', 9),
                                 bg='#f7f9fc', fg=COLOR_TEXT, relief='flat',
                                 state='disabled', wrap='word')
         scrollbar = ttk.Scrollbar(card, command=self.log_text.yview)
@@ -230,7 +225,7 @@ class App:
         footer = tk.Frame(parent, bg=COLOR_BG, height=24)
         footer.pack(fill='x')
         footer.pack_propagate(False)
-        tk.Label(footer, text=f'v2.2 | {self.client.school_name} | 基于 MPL-2.0 开源',
+        tk.Label(footer, text=f'v2.3 | {self.client.school_name} | 基于 MPL-2.0 开源',
                  font=('Microsoft YaHei', 8), bg=COLOR_BG,
                  fg=COLOR_TEXT_SECONDARY).pack(pady=3)
 

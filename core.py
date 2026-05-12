@@ -51,12 +51,12 @@ PREVIEW_API = 'wec-counselor-sign-apps/stu/sign/previewAttachment'
 
 # ==================== UA ====================
 
-APP_UA = ('Mozilla/5.0 (Linux; Android 8.0.0; MI 6 Build/OPR1.170623.027; wv) '
-          'AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/92.0.4515.131 '
-          'Mobile Safari/537.36 okhttp/3.12.4 cpdaily/10.0.13 wisedu/10.0.13')
-BASE_UA = ('Mozilla/5.0 (Linux; Android 8.0.0; MI 6 Build/OPR1.170623.027; wv) '
-           'AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/92.0.4515.131 '
-           'Mobile Safari/537.36 okhttp/3.12.4')
+APP_UA = ('Mozilla/5.0 (Linux; Android 14; 23127PN0CC Build/AP2A.240705.005; wv) '
+          'AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/120.0.6099.230 '
+          'Mobile Safari/537.36 okhttp/4.12.0 cpdaily/9.9.11 wisedu/9.9.11')
+BASE_UA = ('Mozilla/5.0 (Linux; Android 14; 23127PN0CC Build/AP2A.240705.005; wv) '
+           'AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/120.0.6099.230 '
+           'Mobile Safari/537.36 okhttp/4.12.0')
 
 # ==================== 默认校区坐标 ====================
 
@@ -333,7 +333,7 @@ class CpdailyClient:
 
     def list_tasks(self):
         """获取今日查寝任务"""
-        headers = {'Content-Type': 'application/json'}
+        headers = {'User-Agent': APP_UA, 'Content-Type': 'application/json'}
         url = self.campus_host + LIST_API
 
         # 第一次请求（获取MOD_AUTH_CAS）
@@ -356,7 +356,7 @@ class CpdailyClient:
 
     def get_task_detail(self, sign_instance_wid, sign_wid):
         """获取任务详情"""
-        headers = {'Content-Type': 'application/json'}
+        headers = {'User-Agent': APP_UA, 'Content-Type': 'application/json'}
         r = self.session.post(
             self.campus_host + DETAIL_API,
             headers=headers,
@@ -366,6 +366,7 @@ class CpdailyClient:
             }),
             verify=False, timeout=15
         ).json()
+        self.log(f'任务详情响应: {json.dumps(r, ensure_ascii=False)[:500]}')
         return r.get('datas', {})
 
     # -------- 签到操作 --------
@@ -471,8 +472,8 @@ class CpdailyClient:
         # 3. 加密提交
         self.log('正在加密并提交签到...')
         extension = {
-            "lon": lon, "model": "MI 6",
-            "appVersion": "10.0.13", "systemVersion": "8.0.0",
+            "lon": lon, "model": "23127PN0CC",
+            "appVersion": "9.9.11", "systemVersion": "14",
             "userId": '', "systemName": "android",
             "lat": lat, "deviceId": self.device_id,
         }
@@ -480,7 +481,7 @@ class CpdailyClient:
         body_string = aes_encrypt(json.dumps(form), self.aes_key)
         submit_data = {
             'version': 'first_v3',
-            'calVersion': 'firstv',
+            'calVersion': 'firstv_9.9.11',
             'bodyString': body_string,
             'sign': md5(urllib.parse.urlencode(form) + '&' + self.aes_key),
         }
@@ -497,12 +498,16 @@ class CpdailyClient:
             'Connection': 'Keep-Alive',
         }
 
-        res = self.session.post(
+        self.log('正在发送签到请求...')
+        raw_res = self.session.post(
             self.campus_host + SIGN_API,
             headers=sign_headers,
             data=json.dumps(submit_data),
             verify=False, timeout=15
-        ).json()
+        )
+        self.log(f'签到HTTP状态码: {raw_res.status_code}')
+        self.log(f'签到响应原文: {raw_res.text[:500]}')
+        res = raw_res.json()
 
         msg = res.get('message', '')
         success = msg == 'SUCCESS'
