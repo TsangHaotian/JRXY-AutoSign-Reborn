@@ -6,111 +6,270 @@ import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 import threading
 import os
-from PIL import Image, ImageTk
+import time
+from datetime import datetime
+from PIL import Image, ImageTk, ImageDraw, ImageFont
 
 from core import CpdailyClient
+
+
+# ==================== 主题色 ====================
+
+COLOR_PRIMARY = '#2b5c8a'
+COLOR_PRIMARY_LIGHT = '#4a8bc2'
+COLOR_BG = '#f0f4f8'
+COLOR_CARD = '#ffffff'
+COLOR_TEXT = '#1a2332'
+COLOR_TEXT_SECONDARY = '#6b7a8f'
+COLOR_SUCCESS = '#27ae60'
+COLOR_DANGER = '#e74c3c'
+COLOR_WARNING = '#f39c12'
+COLOR_BORDER = '#dce3ed'
+
+FONT_TITLE = ('Microsoft YaHei', 14, 'bold')
+FONT_NORMAL = ('Microsoft YaHei', 10)
+FONT_SMALL = ('Microsoft YaHei', 9)
+FONT_BOLD = ('Microsoft YaHei', 10, 'bold')
+
+
+def _create_rounded_rect(w, h, r, color):
+    """生成圆角矩形图片"""
+    img = Image.new('RGBA', (w, h), (0,0,0,0))
+    draw = ImageDraw.Draw(img)
+    draw.rounded_rectangle([(0,0), (w-1, h-1)], radius=r, fill=color)
+    return ImageTk.PhotoImage(img)
 
 
 class App:
     def __init__(self):
         self.root = tk.Tk()
-        self.root.title('今日校园查寝签到')
-        self.root.geometry('520x750')
-        self.root.resizable(False, False)
+        self.root.title(f'今日校园查寝签到 v2.0')
+        self.root.geometry('720x860')
+        self.root.minsize(680, 800)
+        self.root.configure(bg=COLOR_BG)
 
         # 核心客户端
         self.client = CpdailyClient.from_config()
-        self.client.on_log = self.log
+        self.client.on_log = self._core_log
 
         self.login_thread = None
         self.poll_stop = False
         self.signing = False
         self.photo_path = ''
         self.current_tasks = []
+        self.user_info = {}  # 登录后存储用户信息
+        self.log_messages = []
 
         self._build_ui()
         self._init_school()
 
-    def _build_ui(self):
-        # ===== 登录区域 =====
-        login_frame = ttk.LabelFrame(self.root, text='登录', padding=10)
-        login_frame.pack(fill='x', padx=10, pady=5)
+    # ==================== UI 构建 ====================
+
+    def _build_header(self, parent):
+        """顶部标题区"""
+        header = tk.Frame(parent, bg=COLOR_PRIMARY, height=50)
+        header.pack(fill='x')
+        header.pack_propagate(False)
+
+        tk.Label(header, text='🏫 今日校园查寝签到', fg='white', bg=COLOR_PRIMARY,
+                 font=FONT_TITLE).pack(side='left', padx=20, pady=8)
+
+    def _build_login_card(self, parent):
+        """登录卡片（左二维码 + 右信息）"""
+        card = tk.Frame(parent, bg=COLOR_CARD, highlightbackground=COLOR_BORDER,
+                        highlightthickness=1, padx=15, pady=12)
+        card.pack(fill='x', padx=12, pady=(12, 0))
+
+        # 标题行
+        tk.Label(card, text='🔐 登录认证', font=FONT_BOLD, bg=COLOR_CARD,
+                 fg=COLOR_TEXT).pack(anchor='w')
+
+        # 左右布局
+        body = tk.Frame(card, bg=COLOR_CARD)
+        body.pack(fill='x', pady=6)
+
+        # 左侧：二维码
+        left = tk.Frame(body, bg=COLOR_CARD, width=200)
+        left.pack(side='left')
+        left.pack_propagate(False)
+        self.qr_label = tk.Label(left, bg=COLOR_CARD)
+        self.qr_label.pack()
+        self.btn_login = tk.Button(left, text='📱 扫码登录', font=FONT_BOLD,
+                                   bg=COLOR_PRIMARY, fg='white', relief='flat',
+                                   activebackground=COLOR_PRIMARY_LIGHT,
+                                   command=self.start_login, state='disabled',
+                                   width=16, height=1)
+        self.btn_login.pack(pady=(6, 0))
+
+        # 右侧：登录状态 + 信息
+        right = tk.Frame(body, bg=COLOR_CARD, padx=15)
+        right.pack(side='left', fill='both', expand=True)
+
+        self.login_status_title = tk.Label(right, text='状态', font=FONT_BOLD,
+                                           bg=COLOR_CARD, fg=COLOR_TEXT_SECONDARY,
+                                           anchor='w')
+        self.login_status_title.pack(fill='x')
 
         self.login_status = tk.StringVar(value='正在初始化...')
-        ttk.Label(login_frame, textvariable=self.login_status).pack()
+        tk.Label(right, textvariable=self.login_status, font=FONT_NORMAL,
+                 bg=COLOR_CARD, fg=COLOR_PRIMARY, anchor='w',
+                 wraplength=400).pack(fill='x', pady=(2, 8))
 
-        self.qr_label = ttk.Label(login_frame)
-        self.qr_label.pack(pady=5)
+        # 用户信息（登录后显示）
+        self.user_frame = tk.Frame(right, bg=COLOR_CARD)
+        self.user_label = tk.Label(self.user_frame, bg=COLOR_CARD,
+                                   font=FONT_NORMAL, fg=COLOR_TEXT,
+                                   wraplength=400, justify='left')
+        self.user_label.pack(anchor='w')
+        self.session_label = tk.Label(self.user_frame, bg=COLOR_CARD,
+                                      font=FONT_SMALL, fg=COLOR_TEXT_SECONDARY)
+        self.session_label.pack(anchor='w', pady=(2, 0))
 
-        self.btn_login = ttk.Button(login_frame, text='扫码登录', command=self.start_login, state='disabled')
-        self.btn_login.pack(pady=5)
+    def _build_config_card(self, parent):
+        """配置卡片"""
+        card = tk.Frame(parent, bg=COLOR_CARD, highlightbackground=COLOR_BORDER,
+                        highlightthickness=1, padx=15, pady=10)
+        card.pack(fill='x', padx=12, pady=(8, 0))
 
-        # ===== 校区/照片选择 =====
-        cfg_frame = ttk.Frame(self.root)
-        cfg_frame.pack(fill='x', padx=10, pady=2)
+        tk.Label(card, text='⚙️ 签到配置', font=FONT_BOLD, bg=COLOR_CARD,
+                 fg=COLOR_TEXT).pack(anchor='w')
 
-        ttk.Label(cfg_frame, text='校区:').pack(side='left')
+        row = tk.Frame(card, bg=COLOR_CARD)
+        row.pack(fill='x', pady=4)
+
+        tk.Label(row, text='签到校区', font=FONT_NORMAL, bg=COLOR_CARD,
+                 fg=COLOR_TEXT).pack(side='left')
         self.campus_var = tk.StringVar(value=self.client.campus)
-        campus_menu = ttk.Combobox(cfg_frame, textvariable=self.campus_var,
+        campus_menu = ttk.Combobox(row, textvariable=self.campus_var,
                                    values=list(self.client.campuses.keys()),
-                                   state='readonly', width=12)
-        campus_menu.pack(side='left', padx=5)
+                                   state='readonly', width=12, font=FONT_NORMAL)
+        campus_menu.pack(side='left', padx=(8, 20))
 
-        ttk.Label(cfg_frame, text=' 照片:').pack(side='left')
-        self.photo_label = tk.StringVar(value='(可选)')
-        ttk.Label(cfg_frame, textvariable=self.photo_label, width=15).pack(side='left', padx=2)
-        ttk.Button(cfg_frame, text='选择', command=self._choose_photo).pack(side='left')
+        tk.Label(row, text='签到照片', font=FONT_NORMAL, bg=COLOR_CARD,
+                 fg=COLOR_TEXT).pack(side='left')
+        self.photo_label = tk.Label(row, text='未选择（非必选）', font=FONT_NORMAL,
+                                    bg=COLOR_CARD, fg=COLOR_TEXT_SECONDARY)
+        self.photo_label.pack(side='left', padx=(8, 4))
+        ttk.Button(row, text='浏览', command=self._choose_photo, width=6).pack(side='left')
 
-        # ===== 任务区域 =====
-        task_frame = ttk.LabelFrame(self.root, text='查寝任务', padding=10)
-        task_frame.pack(fill='both', expand=True, padx=10, pady=5)
+    def _build_task_card(self, parent):
+        """任务卡片"""
+        card = tk.Frame(parent, bg=COLOR_CARD, highlightbackground=COLOR_BORDER,
+                        highlightthickness=1, padx=15, pady=10)
+        card.pack(fill='both', expand=True, padx=12, pady=(8, 0))
 
-        self.task_tree = ttk.Treeview(task_frame, columns=('status', 'time'), show='tree', height=5)
+        # 标题行 + 按钮（按钮放在右侧）
+        title_row = tk.Frame(card, bg=COLOR_CARD)
+        title_row.pack(fill='x')
+        tk.Label(title_row, text='📋 查寝任务', font=FONT_BOLD, bg=COLOR_CARD,
+                 fg=COLOR_TEXT).pack(side='left')
+
+        self.task_count_label = tk.Label(title_row, text='', font=FONT_SMALL,
+                                         bg=COLOR_CARD, fg=COLOR_TEXT_SECONDARY)
+        self.task_count_label.pack(side='left', padx=8)
+
+        self.btn_sign = tk.Button(title_row, text='✅ 签到选中', font=FONT_BOLD,
+                                  bg=COLOR_SUCCESS, fg='white', relief='flat',
+                                  command=self.start_sign, state='disabled',
+                                  width=12)
+        self.btn_sign.pack(side='right', padx=(4, 0))
+
+        self.btn_refresh = tk.Button(title_row, text='🔄 刷新', font=FONT_NORMAL,
+                                     bg='white', fg=COLOR_TEXT, relief='flat',
+                                     highlightbackground=COLOR_BORDER,
+                                     command=self.refresh_tasks, state='disabled',
+                                     width=8)
+        self.btn_refresh.pack(side='right')
+
+        # 表格
+        columns = ('status', 'sender', 'time')
+        self.task_tree = ttk.Treeview(card, columns=columns, show='tree', height=6,
+                                      selectmode='browse')
         self.task_tree.heading('#0', text='任务名称')
         self.task_tree.heading('status', text='状态')
-        self.task_tree.heading('time', text='签到时间')
-        self.task_tree.column('#0', width=200)
-        self.task_tree.column('status', width=70)
-        self.task_tree.column('time', width=160)
-        self.task_tree.pack(fill='both', expand=True)
+        self.task_tree.heading('sender', text='发布人')
+        self.task_tree.heading('time', text='签到时段')
+        self.task_tree.column('#0', width=200, minwidth=160)
+        self.task_tree.column('status', width=50, minwidth=45, anchor='center')
+        self.task_tree.column('sender', width=160, minwidth=120)
+        self.task_tree.column('time', width=180, minwidth=150)
         self.task_tree.bind('<<TreeviewSelect>>', self._on_task_select)
 
-        btn_frame = ttk.Frame(task_frame)
-        btn_frame.pack(pady=5)
-        self.btn_refresh = ttk.Button(btn_frame, text='刷新任务', command=self.refresh_tasks, state='disabled')
-        self.btn_refresh.pack(side='left', padx=5)
-        self.btn_sign = ttk.Button(btn_frame, text='签到选中任务', command=self.start_sign, state='disabled')
-        self.btn_sign.pack(side='left', padx=5)
-
-        # ===== 日志区域 =====
-        log_frame = ttk.LabelFrame(self.root, text='日志', padding=5)
-        log_frame.pack(fill='both', padx=10, pady=5)
-
-        self.log_text = tk.Text(log_frame, height=10, width=60, state='disabled')
-        scrollbar = ttk.Scrollbar(log_frame, command=self.log_text.yview)
-        self.log_text.configure(yscrollcommand=scrollbar.set)
-        self.log_text.pack(side='left', fill='both', expand=True)
+        scrollbar = ttk.Scrollbar(card, orient='vertical', command=self.task_tree.yview)
+        self.task_tree.configure(yscrollcommand=scrollbar.set)
+        self.task_tree.pack(side='left', fill='both', expand=True)
         scrollbar.pack(side='right', fill='y')
+
+        self.sign_info_label = tk.Label(card, text='', font=FONT_SMALL,
+                                        bg=COLOR_CARD, fg=COLOR_TEXT_SECONDARY)
+        self.sign_info_label.pack(anchor='w', pady=(4, 0))
+
+    def _build_log_card(self, parent):
+        """日志卡片"""
+        card = tk.Frame(parent, bg=COLOR_CARD, highlightbackground=COLOR_BORDER,
+                        highlightthickness=1, padx=15, pady=8)
+        card.pack(fill='both', padx=12, pady=(8, 12))
+
+        tk.Label(card, text='📝 运行日志', font=FONT_BOLD, bg=COLOR_CARD,
+                 fg=COLOR_TEXT).pack(anchor='w')
+
+        self.log_text = tk.Text(card, height=6, font=('Consolas', 9),
+                                bg='#f7f9fc', fg=COLOR_TEXT, relief='flat',
+                                state='disabled', wrap='word')
+        scrollbar = ttk.Scrollbar(card, command=self.log_text.yview)
+        self.log_text.configure(yscrollcommand=scrollbar.set)
+        self.log_text.pack(side='left', fill='both', expand=True, pady=(4, 0))
+        scrollbar.pack(side='right', fill='y', pady=(4, 0))
+
+    def _build_footer(self, parent):
+        """底部信息"""
+        footer = tk.Frame(parent, bg=COLOR_BG, height=24)
+        footer.pack(fill='x')
+        footer.pack_propagate(False)
+        tk.Label(footer, text=f'v2.0 | {self.client.school_name} | 基于 MPL-2.0 开源',
+                 font=('Microsoft YaHei', 8), bg=COLOR_BG,
+                 fg=COLOR_TEXT_SECONDARY).pack(pady=3)
+
+    def _build_ui(self):
+        container = tk.Frame(self.root, bg=COLOR_BG)
+        container.pack(fill='both', expand=True)
+
+        self._build_header(container)
+        self._build_login_card(container)
+        self._build_config_card(container)
+        self._build_task_card(container)
+        self._build_log_card(container)
+        self._build_footer(container)
 
     # ==================== 工具方法 ====================
 
+    def _core_log(self, msg):
+        """来自core的日志"""
+        now = datetime.now().strftime('%H:%M:%S')
+        self.log_messages.append((now, msg))
+
     def log(self, msg):
+        """写入日志区"""
+        now = datetime.now().strftime('%H:%M:%S')
+        self.log_messages.append((now, msg))
         def _append():
             self.log_text.configure(state='normal')
-            import time
-            now = time.strftime('%H:%M:%S')
             self.log_text.insert('end', f'[{now}] {msg}\n')
             self.log_text.see('end')
             self.log_text.configure(state='disabled')
         self.root.after(0, _append)
 
-    def set_status(self, text):
+    def set_status(self, text, is_ok=False, is_err=False):
+        """更新登录状态"""
         self.root.after(0, lambda: self.login_status.set(text))
 
     def show_qr(self, path):
         try:
-            img = Image.open(path).resize((200, 200))
-            photo = ImageTk.PhotoImage(img)
+            img = Image.open(path).resize((180, 180))
+            # 加白边框
+            bordered = Image.new('RGB', (190, 190), 'white')
+            bordered.paste(img, (5, 5))
+            photo = ImageTk.PhotoImage(bordered)
             self.qr_label.configure(image=photo)
             self.qr_label.image = photo
         except:
@@ -119,20 +278,57 @@ class App:
     def clear_qr(self):
         self.qr_label.configure(image='')
 
+    def update_user_info(self):
+        """登录后更新用户信息（显示学校、校区、会话时间）"""
+        def _update():
+            school = self.client.school_name
+            campus = self.client.campus
+            now = datetime.now().strftime('%Y-%m-%d %H:%M')
+
+            lines = [
+                f'🏫 {school}',
+                f'📍 {campus}',
+            ]
+            self.user_label.configure(text='  |  '.join(lines))
+            self.session_label.configure(text=f'🕐 会话时间: {now}  ·  状态: 有效')
+
+            if not self.user_frame.winfo_ismapped():
+                self.user_frame.pack(fill='x', pady=(4, 0))
+        self.root.after(0, _update)
+
+    def update_task_count(self, unsigned, signed):
+        def _update():
+            total = unsigned + signed
+            if total == 0:
+                self.task_count_label.configure(text='(暂无任务)')
+            else:
+                self.task_count_label.configure(
+                    text=f'(未签 {unsigned} / 已签 {signed} / 共 {total})')
+        self.root.after(0, _update)
+
     def _choose_photo(self):
         path = filedialog.askopenfilename(title='选择签到照片',
                                           filetypes=[('图片', '*.jpg *.jpeg *.png')])
         if path:
             self.photo_path = path
-            self.photo_label.set(os.path.basename(path)[:12])
+            self.photo_label.configure(text=os.path.basename(path)[:16],
+                                       fg=COLOR_TEXT)
 
     def _on_task_select(self, _event):
         sel = self.task_tree.selection()
         if sel:
             item = self.task_tree.item(sel[0])
-            self.btn_sign.configure(state='normal' if item['values'][0] == '❌ 未签' else 'disabled')
+            vals = item['values']
+            if vals and vals[0] == '❌':
+                self.btn_sign.configure(state='normal')
+                self.sign_info_label.configure(text='')
+            else:
+                self.btn_sign.configure(state='disabled')
+                if vals:
+                    self.sign_info_label.configure(text='已签到，无需重复')
         else:
             self.btn_sign.configure(state='disabled')
+            self.sign_info_label.configure(text='')
 
     # ==================== 学校初始化 ====================
 
@@ -141,41 +337,41 @@ class App:
 
     def _do_init_school(self):
         try:
+            self.log('正在获取学校信息...')
             self.client.init_school()
-            self.set_status('准备就绪')
+            self.log(f'学校: {self.client.school_name}')
+            self.log(f'域名: {self.client.campus_host}')
+            self.set_status('准备就绪，请登录')
             self.root.after(0, lambda: self.btn_login.configure(state='normal'))
             if self.client.logged_in:
-                self.set_status('✅ 已登录（恢复会话）')
+                self.set_status('✅ 已登录（恢复会话）', is_ok=True)
                 self.root.after(0, lambda: self.btn_refresh.configure(state='normal'))
                 self.refresh_tasks()
         except Exception as e:
             self.log(f'初始化失败: {e}')
-            self.set_status('初始化失败')
+            self.set_status('初始化失败', is_err=True)
 
     # ==================== 扫码登录 ====================
 
     def start_login(self):
         if self.login_thread and self.login_thread.is_alive():
             return
-        self.btn_login.configure(state='disabled')
+        self.btn_login.configure(state='disabled', text='登录中...')
         self.login_thread = threading.Thread(target=self._do_login, daemon=True)
         self.login_thread.start()
 
     def _do_login(self):
         try:
-            # 获取并显示二维码
             self.log('正在获取二维码...')
             uuid, img_bytes = self.client.get_qr_image()
             self.log('二维码已生成，请用今日校园APP扫描')
             self.set_status('等待扫码...')
 
-            # 保存并显示二维码
             qr_path = 'qrcode_login.png'
             with open(qr_path, 'wb') as f:
                 f.write(img_bytes)
             self.root.after(0, lambda: self.show_qr(qr_path))
 
-            # 轮询扫码
             def on_status(msg):
                 self.set_status(msg)
                 self.log(msg)
@@ -183,24 +379,28 @@ class App:
             success = self.client.poll_qr_login(uuid, on_status=on_status)
 
             if success:
-                self.set_status('✅ 已登录')
+                self.set_status('✅ 登录成功', is_ok=True)
                 self.root.after(0, self.clear_qr)
+                self.root.after(0, lambda: self.btn_login.configure(
+                    state='disabled', text='✅ 已登录'))
                 self.root.after(0, lambda: self.btn_refresh.configure(state='normal'))
                 self.refresh_tasks()
             else:
-                self.set_status('扫码超时')
+                self.set_status('扫码超时', is_err=True)
                 self.root.after(0, self.clear_qr)
-                self.root.after(0, lambda: self.btn_login.configure(state='normal'))
+                self.root.after(0, lambda: self.btn_login.configure(
+                    state='normal', text='📱 扫码登录'))
         except Exception as e:
             self.log(f'登录异常: {e}')
-            self.set_status('登录失败')
+            self.set_status('登录失败', is_err=True)
             self.root.after(0, self.clear_qr)
-            self.root.after(0, lambda: self.btn_login.configure(state='normal'))
+            self.root.after(0, lambda: self.btn_login.configure(
+                state='normal', text='📱 扫码登录'))
 
     # ==================== 刷新任务 ====================
 
     def refresh_tasks(self):
-        self.btn_refresh.configure(state='disabled')
+        self.btn_refresh.configure(state='disabled', text='刷新中...')
         threading.Thread(target=self._do_refresh, daemon=True).start()
 
     def _do_refresh(self):
@@ -208,24 +408,35 @@ class App:
             self.log('正在获取查寝任务...')
             result = self.client.list_tasks()
             self.current_tasks = result['all']
+            unsigned = result['unsigned']
+            signed = result['signed']
+
+            self.update_task_count(len(unsigned), len(signed))
+            self.update_user_info()
 
             def _update():
                 self.task_tree.delete(*self.task_tree.get_children())
-                for t in result['unsigned']:
-                    tr = f"{t.get('singleTaskBeginTime','')} - {t.get('singleTaskEndTime','')}"
-                    self.task_tree.insert('', 'end', text=t['taskName'], values=('❌ 未签', tr))
-                for t in result['signed']:
-                    tr = f"{t.get('singleTaskBeginTime','')} - {t.get('singleTaskEndTime','')}"
-                    self.task_tree.insert('', 'end', text=t['taskName'], values=('✅ 已签', tr))
+                for t in unsigned:
+                    sender = t.get('senderUserName', '')[:8]
+                    tr = f"{t.get('singleTaskBeginTime','')}-{t.get('singleTaskEndTime','')}"
+                    self.task_tree.insert('', 'end', text=t['taskName'],
+                                          values=('❌', sender, tr))
+                for t in signed:
+                    sender = t.get('senderUserName', '')[:8]
+                    tr = f"{t.get('singleTaskBeginTime','')}-{t.get('singleTaskEndTime','')}"
+                    self.task_tree.insert('', 'end', text=t['taskName'],
+                                          values=('✅', sender, tr))
                 if not result['all']:
-                    self.task_tree.insert('', 'end', text='暂无查寝任务', values=('', ''))
+                    self.task_tree.insert('', 'end', text='暂无查寝任务',
+                                          values=('', '', ''))
 
             self.root.after(0, _update)
-            self.log(f'今日: 未签到{len(result["unsigned"])}个, 已签到{len(result["signed"])}个')
+            self.log(f'今日: 未签到{len(unsigned)}个, 已签到{len(signed)}个')
         except Exception as e:
             self.log(f'获取任务失败: {e}')
         finally:
-            self.root.after(0, lambda: self.btn_refresh.configure(state='normal'))
+            self.root.after(0, lambda: self.btn_refresh.configure(
+                state='normal', text='🔄 刷新'))
 
     # ==================== 签到 ====================
 
@@ -237,7 +448,8 @@ class App:
             messagebox.showwarning('提示', '请先选择一个未签到任务')
             return
         item = self.task_tree.item(sel[0])
-        if item['values'][0] != '❌ 未签':
+        vals = item['values']
+        if not vals or vals[0] != '❌':
             messagebox.showwarning('提示', '该任务已签到')
             return
 
@@ -251,11 +463,13 @@ class App:
             messagebox.showerror('错误', '未找到任务数据，请刷新')
             return
 
-        if not messagebox.askyesno('确认签到', f'确定签到"{task_name}"吗？'):
+        if not messagebox.askyesno('确认签到', f'确定签到「{task_name}」吗？\n'
+                                   f'校区: {self.campus_var.get()}'):
             return
 
         self.signing = True
         self.btn_sign.configure(state='disabled', text='签到中...')
+        self.sign_info_label.configure(text='正在提交...', fg=COLOR_WARNING)
         threading.Thread(target=self._do_sign, args=(task,), daemon=True).start()
 
     def _do_sign(self, task):
@@ -263,19 +477,24 @@ class App:
             campus = self.campus_var.get()
             result = self.client.sign_task(task, campus=campus, photo_path=self.photo_path)
             if result['success']:
-                self.set_status('✅ 签到成功')
+                self.set_status('✅ 签到成功', is_ok=True)
+                self.log('✅ 签到成功!')
                 self.root.after(0, lambda: messagebox.showinfo('成功', '签到成功!'))
                 self.refresh_tasks()
             else:
-                self.set_status('签到失败')
-                self.root.after(0, lambda: messagebox.showerror('失败', f'签到失败: {result["message"]}'))
+                self.set_status('签到失败', is_err=True)
+                self.log(f'❌ 签到失败: {result["message"]}')
+                self.root.after(0, lambda: messagebox.showerror(
+                    '失败', f'签到失败: {result["message"]}'))
         except Exception as e:
             self.log(f'签到出错: {e}')
-            self.set_status('签到出错')
+            self.set_status('签到出错', is_err=True)
             self.root.after(0, lambda: messagebox.showerror('错误', f'签到出错: {e}'))
         finally:
             self.signing = False
-            self.root.after(0, lambda: self.btn_sign.configure(state='normal', text='签到选中任务'))
+            self.root.after(0, lambda: self.btn_sign.configure(
+                state='normal', text='✅ 签到选中'))
+            self.root.after(0, lambda: self.sign_info_label.configure(text=''))
 
     # ==================== 启动 ====================
 
