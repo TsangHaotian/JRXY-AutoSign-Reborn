@@ -175,10 +175,10 @@ def main():
     # ===== status =====
     elif args.command == 'status':
         if client.logged_in and client.is_session_valid():
-            print('[INFO] 登录状态: ✅ 有效')
+            print('[OK] 登录状态: 有效')
             print(f'[INFO] 校区: {client.campus}')
         else:
-            print('[INFO] 登录状态: ❌ 无效')
+            print('[WARN] 登录状态: 无效')
             print('[INFO] 请运行 python main.py login 登录')
 
 
