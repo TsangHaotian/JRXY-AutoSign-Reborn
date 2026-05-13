@@ -89,7 +89,7 @@ python main.py status
 4. 更新 `core.py` 里的 des_key 和 aes_key
 5. 发个 PR 救万民于水火
 
-项目里已经备好了 Frida hook 脚本（`hook_key.js`）、frida-server 文件，甚至连模拟器都试了一圈（雷电 9 闪退、雷电 14 闪退、MuMu 也闪退），最后发现这破 App 的 IJM 加密保护会检测模拟器环境，真机才能跑。
+模拟器全试了一圈（雷电 9 闪退、雷电 14 闪退、MuMu 也闪退），最后发现这破 App 的 IJM 加密保护会检测模拟器环境，真机才能跑。
 
 **如果你有 root 手机 + 会玩 Frida，欢迎来搞。** 搞定了你就是这个项目的大恩人，新疆师范大学的学子会记住你的。
 
