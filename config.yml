@@ -15,9 +15,12 @@ campuses:
 # 默认校区
 defaultCampus: 昆仑校区
 
-# 加密密钥（从最新APK提取，如需更新密钥请替换）
+# 加密密钥（Frida hook 从 9.9.20 版本提取）
+# AES key 已通过 Frida hook SecretKeySpec 确认: AES/ECB/PKCS7Padding
+# DES key: 9.9.20 版本 Frida 未在 Java 层检测到 DES 操作，暂保留旧 key
+#   若签到返回"版本过低"，说明 DES key 也已更换，需进一步 hook native 层
 desKey: 'XCE927=='
-aesKey: 'SASEoK4Pa5d4SssO'
+aesKey: 'abcdfe0987612345'
 
 # Cookie持久化文件路径
 cookieFile: '.session_cookies.json'
