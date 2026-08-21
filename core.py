@@ -28,13 +28,15 @@ def des_encrypt(s, key='XCE927=='):
     return base64.b64encode(k.encrypt(s)).decode()
 
 
-def aes_encrypt(data, key='SASEoK4Pa5d4SssO'):
-    iv = b'\x01\x02\x03\x04\x05\x06\x07\x08\x09\x01\x02\x03\x04\x05\x06\x07'
-    aes = AES.new(key.encode(), AES.MODE_CBC, iv)
+def aes_encrypt(data, key='abcdfe0987612345'):
+    """AES-ECB 加密 (Frida hook 验证: AES/ECB/PKCS7Padding, key=abcdfe0987612345)
+    9.9.11+ 版本已从 CBC 切换到 ECB 模式，无 IV。
+    """
+    aes = AES.new(key.encode(), AES.MODE_ECB)
     pad_len = AES.block_size - (len(data) % AES.block_size)
     data += chr(pad_len) * pad_len
     text = aes.encrypt(data.encode())
-    return base64.encodebytes(text).decode().strip()
+    return base64.b64encode(text).decode()
 
 
 def md5(s):
@@ -53,7 +55,7 @@ PREVIEW_API = 'wec-counselor-sign-apps/stu/sign/previewAttachment'
 
 APP_UA = ('Mozilla/5.0 (Linux; Android 14; 23127PN0CC Build/AP2A.240705.005; wv) '
           'AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/120.0.6099.230 '
-          'Mobile Safari/537.36 okhttp/4.12.0 cpdaily/9.9.11 wisedu/9.9.11')
+          'Mobile Safari/537.36 okhttp/4.12.0 cpdaily/9.9.20 wisedu/9.9.20')
 BASE_UA = ('Mozilla/5.0 (Linux; Android 14; 23127PN0CC Build/AP2A.240705.005; wv) '
            'AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/120.0.6099.230 '
            'Mobile Safari/537.36 okhttp/4.12.0')
@@ -72,7 +74,7 @@ class CpdailyClient:
     """今日校园查寝签到客户端 — 业务核心"""
 
     def __init__(self, school_name='新疆师范大学', campus='昆仑校区',
-                 des_key='XCE927==', aes_key='SASEoK4Pa5d4SssO',
+                 des_key='XCE927==', aes_key='abcdfe0987612345',
                  cookie_file='.session_cookies.json'):
         self.school_name = school_name
         self.campus = campus
@@ -473,17 +475,20 @@ class CpdailyClient:
         self.log('正在加密并提交签到...')
         extension = {
             "lon": lon, "model": "23127PN0CC",
-            "appVersion": "9.9.11", "systemVersion": "14",
+            "appVersion": "9.9.20", "systemVersion": "14",
             "userId": '', "systemName": "android",
             "lat": lat, "deviceId": self.device_id,
         }
 
         body_string = aes_encrypt(json.dumps(form), self.aes_key)
+        # 签名必须包含 bodyString (与 CarltonHere 原始项目一致)
+        sign_form = dict(form)
+        sign_form['bodyString'] = body_string
         submit_data = {
             'version': 'first_v3',
-            'calVersion': 'firstv_9.9.11',
+            'calVersion': 'firstv',
             'bodyString': body_string,
-            'sign': md5(urllib.parse.urlencode(form) + '&' + self.aes_key),
+            'sign': md5(urllib.parse.urlencode(sign_form) + '&' + self.aes_key),
         }
         submit_data.update(extension)
 
@@ -537,7 +542,7 @@ class CpdailyClient:
             school_name=cfg.get('schoolName', '新疆师范大学'),
             campus=cfg.get('defaultCampus', '昆仑校区'),
             des_key=cfg.get('desKey', 'XCE927=='),
-            aes_key=cfg.get('aesKey', 'SASEoK4Pa5d4SssO'),
+            aes_key=cfg.get('aesKey', 'abcdfe0987612345'),
             cookie_file=cfg.get('cookieFile', '.session_cookies.json'),
         )
         # 加载自定义校区坐标
